@@ -1,4 +1,5 @@
 from typing import Any, Tuple, List
+
 import pandas as pd
 import statsmodels.api as sm
 import shap
@@ -199,7 +200,7 @@ def shap_features_to_significance(
     return result_df_sorted
 
 
-def select_features(
+def score_features(
     tree_model: Any,
     validation_df: pd.DataFrame,
     feature_names: List[str],
