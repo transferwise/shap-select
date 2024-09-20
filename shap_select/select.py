@@ -1,11 +1,13 @@
-from typing import Any, Tuple, List
+from typing import Any, Tuple, List, Dict
 
 import pandas as pd
 import statsmodels.api as sm
 import shap
 
 
-def create_shap_features(tree_model: Any, validation_df: pd.DataFrame) -> pd.DataFrame:
+def create_shap_features(
+    tree_model: Any, validation_df: pd.DataFrame, classes: List | None = None
+) -> pd.DataFrame | Dict[Any, pd.DataFrame]:
     """
     Generates SHAP (SHapley Additive exPlanations) values for a given tree-based model on a validation dataset.
 
@@ -18,13 +20,26 @@ def create_shap_features(tree_model: Any, validation_df: pd.DataFrame) -> pd.Dat
     - pd.DataFrame: A DataFrame containing the SHAP values for each feature in the `validation_df`, where each column
       corresponds to the SHAP values of a feature, and the rows match the index of the `validation_df`.
     """
-    explainer = shap.TreeExplainer(tree_model, model_output="raw")
-    shap_values = explainer(validation_df).values
+    explainer = shap.TreeExplainer(tree_model, model_output="raw")(validation_df)
+    shap_values = explainer.values
 
-    # Create a DataFrame with the SHAP values, with one column per feature
-    return pd.DataFrame(
-        shap_values, columns=validation_df.columns, index=validation_df.index
-    )
+    if len(shap_values.shape) == 2:
+        assert (
+            classes is None
+        ), "Don't specify classes for binary classification or regression"
+        # Create a DataFrame with the SHAP values, with one column per feature
+        return pd.DataFrame(
+            shap_values, columns=validation_df.columns, index=validation_df.index
+        )
+    elif len(shap_values.shape) == 3:  # multiclass classification
+        out = {}
+        for i, c in enumerate(classes):
+            out[i] = pd.DataFrame(
+                shap_values[:, :, i],
+                columns=validation_df.columns,
+                index=validation_df.index,
+            )
+        return out
 
 
 def binary_classifier_significance(
@@ -47,7 +62,7 @@ def binary_classifier_significance(
     """
 
     # Add a constant to the features for the intercept in logistic regression
-    shap_features_with_const = sm.add_constant(shap_features)
+    shap_features_with_const = shap_features  # sm.add_constant(shap_features)
 
     # Fit the logistic regression model
     logit_model = sm.Logit(target, shap_features_with_const)
@@ -71,7 +86,7 @@ def binary_classifier_significance(
 
 
 def multi_classifier_significance(
-    shap_features: pd.DataFrame, target: pd.Series
+    shap_features: Dict[Any, pd.DataFrame], target: pd.Series
 ) -> (pd.DataFrame, list):
     """
     Fits a binary logistic regression model for each unique class in the target, comparing each class against all others (one-vs-all).
@@ -85,13 +100,12 @@ def multi_classifier_significance(
     - A DataFrame with feature names and their maximum significance values across all binary classifications.
     - A list of DataFrames, one for each binary classification, containing feature names, coefficients, standard errors, and statistical significance.
     """
-    unique_classes = target.unique()
     significance_dfs = []
 
     # Iterate through each class and perform binary classification (one-vs-all)
-    for cls in unique_classes:
+    for cls, feature_df in shap_features.items():
         binary_target = (target == cls).astype(int)
-        significance_df = binary_classifier_significance(shap_features, binary_target)
+        significance_df = binary_classifier_significance(feature_df, binary_target)
         significance_dfs.append(significance_df)
 
     # Combine results into a single DataFrame with the max significance value for each feature
@@ -101,7 +115,6 @@ def multi_classifier_significance(
         .agg({"stat.significance": "min", "t-value": "max", "closeness to 1.0": "min"})
         .reset_index(drop=True)
     )
-    max_significance_df.columns = ["feature name", "max significance value"]
 
     return max_significance_df, significance_dfs
 
@@ -151,7 +164,9 @@ def closeness_to_one(df: pd.DataFrame) -> pd.Series:
 
 
 def shap_features_to_significance(
-    shap_features: pd.DataFrame, target: pd.Series, task: str | None = None
+    shap_features: pd.DataFrame | List[pd.DataFrame],
+    target: pd.Series,
+    task: str,
 ) -> pd.DataFrame:
     """
     Determines the task (regression, binary, or multi-class classification) based on the target and calls the appropriate
@@ -160,8 +175,7 @@ def shap_features_to_significance(
     Parameters:
     shap_features (pd.DataFrame): A DataFrame containing the features used for prediction.
     target (pd.Series): The target series for prediction (either continuous or categorical).
-    task (str | None): The type of task to perform. If None, the function will infer the task automatically.
-                       The options are "regression", "binary", or "multi".
+    task (str): The type of task to perform: "regression", "binary", or "multiclass".
 
     Returns:
     pd.DataFrame: A DataFrame containing:
@@ -170,27 +184,18 @@ def shap_features_to_significance(
         Sorted in descending order of significance (ascending p-value).
     """
 
-    # Infer the task if not provided
-    if task is None:
-        if pd.api.types.is_numeric_dtype(target) and target.nunique() > 10:
-            task = "regression"
-        elif target.nunique() == 2:
-            task = "binary"
-        else:
-            task = "multi"
-
     # Call the appropriate function based on the task
     if task == "regression":
         result_df = regression_significance(shap_features, target)
     elif task == "binary":
         result_df = binary_classifier_significance(shap_features, target)
-    elif task == "multi":
+    elif task == "multiclass":
         max_significance_df, _ = multi_classifier_significance(shap_features, target)
         result_df = max_significance_df.rename(
             columns={"max significance value": "stat.significance"}
         )
     else:
-        raise ValueError("`task` must be 'regression', 'binary', 'multi' or None.")
+        raise ValueError("`task` must be 'regression', 'binary', 'multiclass' or None.")
 
     # Sort the result by statistical significance in ascending order (more significant features first)
     result_df_sorted = result_df.sort_values(by="t-value", ascending=False).reset_index(
@@ -227,8 +232,22 @@ def score_features(
     if isinstance(target, str):
         target = validation_df[target]
 
-    # Generate SHAP values for the validation dataset
-    shap_features = create_shap_features(tree_model, validation_df[feature_names])
+    # Infer the task if not provided
+    if task is None:
+        if pd.api.types.is_numeric_dtype(target) and target.nunique() > 10:
+            task = "regression"
+        elif target.nunique() == 2:
+            task = "binary"
+        else:
+            task = "multiclass"
+
+    if task == "multiclass":
+        unique_classes = sorted(list(target.unique()))
+        shap_features = create_shap_features(
+            tree_model, validation_df[feature_names], unique_classes
+        )
+    else:
+        shap_features = create_shap_features(tree_model, validation_df[feature_names])
 
     # Compute statistical significance of each feature
     significance_df = shap_features_to_significance(shap_features, target, task)
@@ -237,6 +256,6 @@ def score_features(
     significance_df["Selected"] = (
         significance_df["stat.significance"] < threshold
     ).astype(int)
-    significance_df.loc[significance_df["coefficient"] < 0, "Selected"] = -1
+    significance_df.loc[significance_df["t-value"] < 0, "Selected"] = -1
 
     return significance_df, shap_features

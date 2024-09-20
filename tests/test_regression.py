@@ -121,11 +121,24 @@ def generate_data_multiclass():
     return X_train, X_val, y_train, y_val
 
 
-def train_lightgbm(X_train, X_val, y_train, y_val):
-    """Train a LightGBM model"""
+def train_lightgbm(X_train, X_val, y_train, y_val, task_type):
+    """Train a LightGBM model based on the task type"""
     train_data = lgb.Dataset(X_train, label=y_train)
     val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
-    params = {"objective": "regression", "metric": "rmse", "verbose": -1}
+
+    if task_type == "binary":
+        params = {"objective": "binary", "metric": "binary_logloss", "verbose": -1}
+    elif task_type == "regression":
+        params = {"objective": "regression", "metric": "rmse", "verbose": -1}
+    elif task_type == "multiclass":
+        params = {
+            "objective": "multiclass",
+            "num_class": 3,
+            "metric": "multi_logloss",
+            "verbose": -1,
+        }
+    else:
+        raise ValueError(f"Unsupported task type: {task_type}")
 
     model = lgb.train(
         params,
@@ -138,12 +151,33 @@ def train_lightgbm(X_train, X_val, y_train, y_val):
     return model
 
 
-def train_xgboost(X_train, X_val, y_train, y_val):
-    """Train an XGBoost model"""
+def train_xgboost(X_train, X_val, y_train, y_val, task_type):
+    """Train an XGBoost model based on the task type"""
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
 
-    params = {"objective": "reg:squarederror", "eval_metric": "rmse", "verbosity": 0}
+    if task_type == "binary":
+        params = {
+            "objective": "binary:logistic",
+            "eval_metric": "logloss",
+            "verbosity": 0,
+        }
+    elif task_type == "regression":
+        params = {
+            "objective": "reg:squarederror",
+            "eval_metric": "rmse",
+            "verbosity": 0,
+        }
+    elif task_type == "multiclass":
+        params = {
+            "objective": "multi:softprob",
+            "num_class": 3,
+            "eval_metric": "mlogloss",
+            "verbosity": 0,
+        }
+    else:
+        raise ValueError(f"Unsupported task type: {task_type}")
+
     evals = [(dval, "valid")]
     model = xgb.train(
         params, dtrain, num_boost_round=1000, evals=evals, early_stopping_rounds=50
@@ -151,11 +185,29 @@ def train_xgboost(X_train, X_val, y_train, y_val):
     return model
 
 
-def train_catboost(X_train, X_val, y_train, y_val):
-    """Train a CatBoost model"""
-    model = cb.CatBoostRegressor(
-        iterations=1000, loss_function="RMSE", verbose=0, early_stopping_rounds=50
-    )
+def train_catboost(X_train, X_val, y_train, y_val, task_type):
+    """Train a CatBoost model based on the task type"""
+    if task_type == "binary":
+        model = cb.CatBoostClassifier(
+            iterations=1000,
+            loss_function="Logloss",
+            verbose=0,
+            early_stopping_rounds=50,
+        )
+    elif task_type == "regression":
+        model = cb.CatBoostRegressor(
+            iterations=1000, loss_function="RMSE", verbose=0, early_stopping_rounds=50
+        )
+    elif task_type == "multiclass":
+        model = cb.CatBoostClassifier(
+            iterations=1000,
+            loss_function="MultiClass",
+            verbose=0,
+            early_stopping_rounds=50,
+        )
+    else:
+        raise ValueError(f"Unsupported task type: {task_type}")
+
     model.fit(X_train, y_train, eval_set=(X_val, y_val), use_best_model=True)
     return model
 
@@ -166,7 +218,7 @@ def train_catboost(X_train, X_val, y_train, y_val):
     [
         ("generate_data_regression", "regression"),
         ("generate_data_binary", "binary"),
-        # ("generate_data_multiclass", "multi"), # need better data generation, this one fails
+        ("generate_data_multiclass", "multiclass"),
     ],
 )
 def test_selected_column_values(model_type, data_fixture, task_type, request):
@@ -175,44 +227,32 @@ def test_selected_column_values(model_type, data_fixture, task_type, request):
 
     # Select the correct model to train
     if model_type == "lightgbm":
-        model = train_lightgbm(X_train, X_val, y_train, y_val)
+        model = train_lightgbm(X_train, X_val, y_train, y_val, task_type)
     elif model_type == "xgboost":
-        model = train_xgboost(X_train, X_val, y_train, y_val)
+        model = train_xgboost(X_train, X_val, y_train, y_val, task_type)
     elif model_type == "catboost":
-        model = train_catboost(X_train, X_val, y_train, y_val)
+        model = train_catboost(X_train, X_val, y_train, y_val, task_type)
     else:
         raise ValueError("Unsupported model type")
 
-    # Call the select_features function for the correct task (regression, binary, multiclass)
+    # Call the score_features function for the correct task (regression, binary, multiclass)
     selected_features_df, _ = score_features(
         model, X_val, X_val.columns.tolist(), y_val, task=task_type
     )
 
-    # For binary/multiclass classification, check significance of each feature
-    if task_type in ["binary", "multi"]:
-        selected_rows = selected_features_df[
-            selected_features_df["feature name"].isin(["x7", "x8", "x9"])
-        ]
-        assert (
-            selected_rows["Selected"] <= 0
-        ).all(), "The Selected column must have negative or zero values for features x7, x8, x9"
-        other_features_rows = selected_features_df[
-            ~selected_features_df["feature name"].isin(["x7", "x8", "x9", "const"])
-        ]
-        assert (
-            other_features_rows["Selected"] > 0
-        ).all(), "The Selected column must have positive values for features other than x7, x8, x9"
-    else:
-        # For regression, check significance as well
-        selected_rows = selected_features_df[
-            selected_features_df["feature name"].isin(["x7", "x8", "x9"])
-        ]
-        assert (
-            selected_rows["Selected"] <= 0
-        ).all(), "The Selected column must have negative or zero values for features x7, x8, x9"
-        other_features_rows = selected_features_df[
-            ~selected_features_df["feature name"].isin(["x7", "x8", "x9", "const"])
-        ]
-        assert (
-            other_features_rows["Selected"] > 0
-        ).all(), "The Selected column must have positive values for features other than x7, x8, x9"
+    # Check feature significance for all task types
+    selected_rows = selected_features_df[
+        selected_features_df["feature name"].isin(["x7", "x8", "x9"])
+    ]
+    assert (
+        selected_rows["Selected"] <= 0
+    ).all(), (
+        "The Selected column must have negative or zero values for features x7, x8, x9"
+    )
+
+    other_features_rows = selected_features_df[
+        ~selected_features_df["feature name"].isin(["x7", "x8", "x9", "const"])
+    ]
+    assert (
+        other_features_rows["Selected"] > 0
+    ).all(), "The Selected column must have positive values for features other than x7, x8, x9"
