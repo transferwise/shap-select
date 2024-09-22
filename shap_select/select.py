@@ -2,6 +2,7 @@ from typing import Any, Tuple, List, Dict
 
 import pandas as pd
 import statsmodels.api as sm
+import scipy.stats as stats
 import shap
 
 
@@ -62,7 +63,7 @@ def binary_classifier_significance(
     """
 
     # Add a constant to the features for the intercept in logistic regression
-    shap_features_with_const = shap_features  # sm.add_constant(shap_features)
+    shap_features_with_const = sm.add_constant(shap_features)
 
     # Fit the logistic regression model
     logit_model = sm.Logit(target, shap_features_with_const)
@@ -81,12 +82,14 @@ def binary_classifier_significance(
             "t-value": summary_frame["Coef."] / summary_frame["Std.Err."],
         }
     ).reset_index(drop=True)
-    result_df["closeness to 1.0"] = closeness_to_one(result_df).abs()
+    result_df["closeness to 1.0"] = (result_df["coefficient"] - 1.0).abs()
     return result_df
 
 
 def multi_classifier_significance(
-    shap_features: Dict[Any, pd.DataFrame], target: pd.Series
+    shap_features: Dict[Any, pd.DataFrame],
+    target: pd.Series,
+    return_individual_significances: bool = False,
 ) -> (pd.DataFrame, list):
     """
     Fits a binary logistic regression model for each unique class in the target, comparing each class against all others (one-vs-all).
@@ -112,11 +115,24 @@ def multi_classifier_significance(
     combined_df = pd.concat(significance_dfs)
     max_significance_df = (
         combined_df.groupby("feature name", as_index=False)
-        .agg({"stat.significance": "min", "t-value": "max", "closeness to 1.0": "min"})
+        .agg(
+            {
+                "t-value": "max",
+                "closeness to 1.0": "min",
+                "coefficient": max,
+            }
+        )
         .reset_index(drop=True)
     )
 
-    return max_significance_df, significance_dfs
+    # Len(shap_features) multiplier is the Bonferroni correction
+    max_significance_df["stat.significance"] = max_significance_df["t-value"].apply(
+        lambda x: len(shap_features) * (1 - stats.norm.cdf(x))
+    )
+    if return_individual_significances:
+        return max_significance_df, significance_dfs
+    else:
+        return max_significance_df
 
 
 def regression_significance(
@@ -154,7 +170,7 @@ def regression_significance(
             "t-value": summary_frame["Coef."] / summary_frame["Std.Err."],
         }
     ).reset_index(drop=True)
-    result_df["closeness to 1.0"] = closeness_to_one(result_df).abs()
+    result_df["closeness to 1.0"] = (result_df["coefficient"] - 1.0).abs()
 
     return result_df
 
@@ -190,10 +206,7 @@ def shap_features_to_significance(
     elif task == "binary":
         result_df = binary_classifier_significance(shap_features, target)
     elif task == "multiclass":
-        max_significance_df, _ = multi_classifier_significance(shap_features, target)
-        result_df = max_significance_df.rename(
-            columns={"max significance value": "stat.significance"}
-        )
+        result_df = multi_classifier_significance(shap_features, target)
     else:
         raise ValueError("`task` must be 'regression', 'binary', 'multiclass' or None.")
 

@@ -212,7 +212,10 @@ def train_catboost(X_train, X_val, y_train, y_val, task_type):
     return model
 
 
-@pytest.mark.parametrize("model_type", ["lightgbm", "xgboost", "catboost"])
+@pytest.mark.parametrize(
+    "model_type",
+    ["lightgbm", "xgboost", "catboost"],
+)
 @pytest.mark.parametrize(
     "data_fixture, task_type",
     [
