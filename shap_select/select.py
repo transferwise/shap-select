@@ -2,6 +2,7 @@ from typing import Any, Tuple, List, Dict
 
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.genmod.families import Binomial
 import scipy.stats as stats
 import shap
 
@@ -83,7 +84,7 @@ def binary_classifier_significance(
         }
     ).reset_index(drop=True)
     result_df["closeness to 1.0"] = (result_df["coefficient"] - 1.0).abs()
-    return result_df
+    return result_df.loc[~(result_df["feature name"] == "const"), :]
 
 
 def multi_classifier_significance(
@@ -119,7 +120,7 @@ def multi_classifier_significance(
             {
                 "t-value": "max",
                 "closeness to 1.0": "min",
-                "coefficient": max,
+                "coefficient": "max",
             }
         )
         .reset_index(drop=True)
@@ -225,7 +226,8 @@ def score_features(
     target: pd.Series | str,  # str is column name in validation_df
     task: str | None = None,
     threshold: float = 0.05,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    return_shap_features: bool = False,
+) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Select features based on their SHAP values and statistical significance.
 
@@ -236,6 +238,7 @@ def score_features(
     - target (pd.Series | str): The target values, or the name of the target column in `validation_df`.
     - task (str | None): The task type ('regression', 'binary', or 'multi'). If None, it is inferred automatically.
     - threshold (float): Significance threshold to select features. Default is 0.05.
+    - return_shap_features (bool): Whether to also return the shapley values dataframe(s)
 
     Returns:
     - pd.DataFrame: A DataFrame containing the feature names, statistical significance, and a 'Selected' column
@@ -271,4 +274,7 @@ def score_features(
     ).astype(int)
     significance_df.loc[significance_df["t-value"] < 0, "Selected"] = -1
 
-    return significance_df, shap_features
+    if return_shap_features:
+        return significance_df, shap_features
+    else:
+        return significance_df
