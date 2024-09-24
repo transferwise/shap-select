@@ -5,7 +5,7 @@ import lightgbm as lgb
 import xgboost as xgb
 import catboost as cb
 from sklearn.model_selection import train_test_split
-from shap_select import score_features
+from shap_select import shap_select
 
 
 @pytest.fixture
@@ -239,7 +239,7 @@ def test_selected_column_values(model_type, data_fixture, task_type, request):
         raise ValueError("Unsupported model type")
 
     # Call the score_features function for the correct task (regression, binary, multiclass)
-    selected_features_df = score_features(
+    selected_features_df = shap_select(
         model, X_val, X_val.columns.tolist(), y_val, task=task_type
     )
 

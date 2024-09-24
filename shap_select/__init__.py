@@ -1,1 +1,1 @@
-from .select import score_features
+from .select import shap_select

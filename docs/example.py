@@ -4,7 +4,7 @@ import lightgbm as lgb
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 
-from shap_select import score_features
+from shap_select import shap_select
 
 # Generate a dataset with 8 normally distributed features and a target based on a given formula
 np.random.seed(42)
@@ -83,7 +83,7 @@ else:
 
 
 # Call the select_features function
-selected_features_df, shap_features = score_features(
+selected_features_df, shap_features = shap_select(
     model, X_val, X.columns.tolist(), y_val
 )
 
