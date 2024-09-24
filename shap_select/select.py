@@ -24,7 +24,7 @@ def create_shap_features(
     - pd.DataFrame: A DataFrame containing the SHAP values for each feature in the `validation_df`, where each column
       corresponds to the SHAP values of a feature, and the rows match the index of the `validation_df`.
     """
-    explainer = shap.TreeExplainer(tree_model, model_output="raw")(validation_df)
+    explainer = shap.Explainer(tree_model, model_output="raw")(validation_df)
     shap_values = explainer.values
 
     if len(shap_values.shape) == 2:
