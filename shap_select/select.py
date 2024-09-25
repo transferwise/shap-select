@@ -254,11 +254,11 @@ def shap_features_to_significance(
 def shap_select(
     tree_model: Any,
     validation_df: pd.DataFrame,
-    feature_names: List[str],
     target: pd.Series | str,  # str is column name in validation_df
+    feature_names: List[str] | None = None,
     task: str | None = None,
     threshold: float = 0.05,
-    return_shap_features: bool = False,
+    return_extended_data: bool = False,
 ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Select features based on their SHAP values and statistical significance.
@@ -270,7 +270,7 @@ def shap_select(
     - target (pd.Series | str): The target values, or the name of the target column in `validation_df`.
     - task (str | None): The task type ('regression', 'binary', or 'multi'). If None, it is inferred automatically.
     - threshold (float): Significance threshold to select features. Default is 0.05.
-    - return_shap_features (bool): Whether to also return the shapley values dataframe(s)
+    - return_extended_data (bool): Whether to also return the shapley values dataframe(s) and some extra columns
 
     Returns:
     - pd.DataFrame: A DataFrame containing the feature names, statistical significance, and a 'Selected' column
@@ -279,6 +279,9 @@ def shap_select(
     # If target is a string (column name), extract the target series from validation_df
     if isinstance(target, str):
         target = validation_df[target]
+
+    if feature_names is None:
+        feature_names = validation_df.columns.tolist()
 
     # Infer the task if not provided
     if task is None:
@@ -301,12 +304,14 @@ def shap_select(
     significance_df = shap_features_to_significance(shap_features, target, task)
 
     # Add 'Selected' column based on the threshold
-    significance_df["Selected"] = (
+    significance_df["selected"] = (
         significance_df["stat.significance"] < threshold
     ).astype(int)
-    significance_df.loc[significance_df["t-value"] < 0, "Selected"] = -1
+    significance_df.loc[significance_df["t-value"] < 0, "selected"] = -1
 
-    if return_shap_features:
+    if return_extended_data:
         return significance_df, shap_features
     else:
-        return significance_df
+        return significance_df[
+            ["feature name", "t-value", "stat.significance", "coefficient", "selected"]
+        ]
