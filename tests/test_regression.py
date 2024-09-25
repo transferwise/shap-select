@@ -5,7 +5,7 @@ import lightgbm as lgb
 import xgboost as xgb
 import catboost as cb
 from sklearn.model_selection import train_test_split
-from shap_select import score_features
+from shap_select import shap_select
 
 
 @pytest.fixture
@@ -239,16 +239,14 @@ def test_selected_column_values(model_type, data_fixture, task_type, request):
         raise ValueError("Unsupported model type")
 
     # Call the score_features function for the correct task (regression, binary, multiclass)
-    selected_features_df = score_features(
-        model, X_val, X_val.columns.tolist(), y_val, task=task_type
-    )
+    selected_features_df = shap_select(model, X_val, y_val, task=task_type)
 
     # Check feature significance for all task types
     selected_rows = selected_features_df[
         selected_features_df["feature name"].isin(["x7", "x8", "x9"])
     ]
     assert (
-        selected_rows["Selected"] <= 0
+        selected_rows["selected"] <= 0
     ).all(), (
         "The Selected column must have negative or zero values for features x7, x8, x9"
     )
@@ -257,5 +255,5 @@ def test_selected_column_values(model_type, data_fixture, task_type, request):
         ~selected_features_df["feature name"].isin(["x7", "x8", "x9", "const"])
     ]
     assert (
-        other_features_rows["Selected"] > 0
+        other_features_rows["selected"] > 0
     ).all(), "The Selected column must have positive values for features other than x7, x8, x9"

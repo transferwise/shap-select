@@ -1,8 +1,10 @@
 from typing import Any, Tuple, List, Dict
 
 import pandas as pd
+import numpy as np
 import statsmodels.api as sm
-from statsmodels.genmod.families import Binomial
+from sklearn.linear_model import Lasso, LogisticRegression
+from sklearn.preprocessing import StandardScaler
 import scipy.stats as stats
 import shap
 
@@ -22,7 +24,7 @@ def create_shap_features(
     - pd.DataFrame: A DataFrame containing the SHAP values for each feature in the `validation_df`, where each column
       corresponds to the SHAP values of a feature, and the rows match the index of the `validation_df`.
     """
-    explainer = shap.TreeExplainer(tree_model, model_output="raw")(validation_df)
+    explainer = shap.Explainer(tree_model, model_output="raw")(validation_df)
     shap_values = explainer.values
 
     if len(shap_values.shape) == 2:
@@ -64,10 +66,32 @@ def binary_classifier_significance(
     """
 
     # Add a constant to the features for the intercept in logistic regression
-    shap_features_with_const = sm.add_constant(shap_features)
 
-    # Fit the logistic regression model
-    logit_model = sm.Logit(target, shap_features_with_const)
+    # Standardizing the features (Logistic regression with L1 regularization tends to
+    # work better with standardized data)
+    shap_features_scaled = pd.DataFrame(
+        data=StandardScaler().fit_transform(shap_features),
+        columns=shap_features.columns,
+    )
+    shap_features_with_const = sm.add_constant(shap_features_scaled)
+
+    # To avoid linear dependence of features, first do a pass with tiny L1-reg
+    # and throw away the zero coeffs
+    # Define the Logistic Regression model with L1 regularization
+    logistic_l1 = LogisticRegression(
+        penalty="l1", solver="liblinear", fit_intercept=False, C=1e6
+    )  # C is the inverse of regularization strength
+    logistic_l1.fit(shap_features_with_const, target)
+
+    # Get the coefficients from the Logistic Regression model
+    # Logistic regression gives an array of shape (1, n_features), so we take [0]
+    coefficients = logistic_l1.coef_[0]
+    shap_features_filtered = sm.add_constant(shap_features).loc[
+        :, np.abs(coefficients) > 1e-6
+    ]
+
+    # Fit the logistic regression model that will generate confidence intervals
+    logit_model = sm.Logit(target, shap_features_filtered)
     result = logit_model.fit(disp=False)
 
     # Extract the results
@@ -154,8 +178,16 @@ def regression_significance(
         - stderr: The standard error for each coefficient.
         - stat.significance: The p-value (statistical significance) for each feature.
     """
-    # Fit the linear regression model
-    ols_model = sm.OLS(target, shap_features)
+
+    # To avoid collinearity of features, first do a pass with tiny L1-reg
+    # and throw away the zero coeffs
+    shap_features_scaled = StandardScaler().fit_transform(shap_features)
+    coefficients = Lasso(alpha=1e-6).fit(shap_features_scaled, target).coef_
+    shap_features_filtered = shap_features.loc[:, np.abs(coefficients) > 1e-6]
+
+    # Sadly regularized models tend to not produce confidence intervals, so
+    # Fit the linear regression model that will generate confidence intervals
+    ols_model = sm.OLS(target, shap_features_filtered)
     result = ols_model.fit()
 
     # Extract the results
@@ -219,14 +251,14 @@ def shap_features_to_significance(
     return result_df_sorted
 
 
-def score_features(
+def shap_select(
     tree_model: Any,
     validation_df: pd.DataFrame,
-    feature_names: List[str],
     target: pd.Series | str,  # str is column name in validation_df
+    feature_names: List[str] | None = None,
     task: str | None = None,
     threshold: float = 0.05,
-    return_shap_features: bool = False,
+    return_extended_data: bool = False,
 ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Select features based on their SHAP values and statistical significance.
@@ -238,7 +270,7 @@ def score_features(
     - target (pd.Series | str): The target values, or the name of the target column in `validation_df`.
     - task (str | None): The task type ('regression', 'binary', or 'multi'). If None, it is inferred automatically.
     - threshold (float): Significance threshold to select features. Default is 0.05.
-    - return_shap_features (bool): Whether to also return the shapley values dataframe(s)
+    - return_extended_data (bool): Whether to also return the shapley values dataframe(s) and some extra columns
 
     Returns:
     - pd.DataFrame: A DataFrame containing the feature names, statistical significance, and a 'Selected' column
@@ -247,6 +279,9 @@ def score_features(
     # If target is a string (column name), extract the target series from validation_df
     if isinstance(target, str):
         target = validation_df[target]
+
+    if feature_names is None:
+        feature_names = validation_df.columns.tolist()
 
     # Infer the task if not provided
     if task is None:
@@ -269,12 +304,14 @@ def score_features(
     significance_df = shap_features_to_significance(shap_features, target, task)
 
     # Add 'Selected' column based on the threshold
-    significance_df["Selected"] = (
+    significance_df["selected"] = (
         significance_df["stat.significance"] < threshold
     ).astype(int)
-    significance_df.loc[significance_df["t-value"] < 0, "Selected"] = -1
+    significance_df.loc[significance_df["t-value"] < 0, "selected"] = -1
 
-    if return_shap_features:
+    if return_extended_data:
         return significance_df, shap_features
     else:
-        return significance_df
+        return significance_df[
+            ["feature name", "t-value", "stat.significance", "coefficient", "selected"]
+        ]
