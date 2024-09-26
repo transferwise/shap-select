@@ -14,5 +14,6 @@ Earlier packages using Shapley values for feature selection exist, the advantage
 ```python
 from shap_select import shap_select
 # Here model is any model supported by the shap library, fitted on a different (train) dataset
+# Task can be regression, binary, or multiclass
 selected_features_df = shap_select(model, X_val, y_val, task="multiclass", threshold=0.05)
 ```
