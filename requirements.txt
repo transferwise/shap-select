@@ -3,3 +3,4 @@ scikit_learn
 scipy
 shap
 statsmodels
+numpy
