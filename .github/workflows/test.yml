@@ -27,7 +27,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt  # Assuming you have a requirements.txt
+        pip install -r requirements.txt
+        pip install lightgbm xgboost catboost  # Install the libraries required for tests
         pip install pytest
 
     # Run tests using pytest
