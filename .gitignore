@@ -24,3 +24,9 @@ build/
 out/
 .gradle/
 bin/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
