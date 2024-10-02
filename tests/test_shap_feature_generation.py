@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from shap_select import create_shap_features
+from shap_select.select import create_shap_features
 import lightgbm as lgb
 
 

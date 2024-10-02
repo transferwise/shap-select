@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from shap_select import binary_classifier_significance, regression_significance
+from shap_select.select import binary_classifier_significance, regression_significance
 import statsmodels.api as sm
 
 
