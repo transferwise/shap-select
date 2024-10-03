@@ -1,10 +1,7 @@
 from typing import Any, Tuple, List, Dict
 
 import pandas as pd
-import numpy as np
 import statsmodels.api as sm
-from sklearn.linear_model import Lasso, LogisticRegression
-from sklearn.preprocessing import StandardScaler
 import scipy.stats as stats
 import shap
 
@@ -112,7 +109,9 @@ def multi_classifier_significance(
     # Iterate through each class and perform binary classification (one-vs-all)
     for cls, feature_df in shap_features.items():
         binary_target = (target == cls).astype(int)
-        significance_df = binary_classifier_significance(feature_df, binary_target, alpha)
+        significance_df = binary_classifier_significance(
+            feature_df, binary_target, alpha
+        )
         significance_dfs.append(significance_df)
 
     # Combine results into a single DataFrame with the max significance value for each feature
@@ -227,14 +226,16 @@ def iterative_shap_feature_reduction(
     shap_features: pd.DataFrame | List[pd.DataFrame],
     target: pd.Series,
     task: str,
-    alpha: float=1e-6,
+    alpha: float = 1e-6,
 ) -> pd.DataFrame:
     collected_rows = []  # List to store the rows we collect during each iteration
 
     features_left = True
     while features_left:
         # Call the original shap_features_to_significance function
-        significance_df = shap_features_to_significance(shap_features, target, task, alpha)
+        significance_df = shap_features_to_significance(
+            shap_features, target, task, alpha
+        )
 
         # Find the feature with the lowest t-value
         min_t_value_row = significance_df.loc[significance_df["t-value"].idxmin()]
@@ -315,7 +316,9 @@ def shap_select(
         shap_features = create_shap_features(tree_model, validation_df[feature_names])
 
     # Compute statistical significance of each feature, recursively ablating
-    significance_df = iterative_shap_feature_reduction(shap_features, target, task, alpha)
+    significance_df = iterative_shap_feature_reduction(
+        shap_features, target, task, alpha
+    )
 
     # Add 'Selected' column based on the threshold
     significance_df["selected"] = (
