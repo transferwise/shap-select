@@ -4,7 +4,7 @@
 The basic idea is running a linear or logistic regression of the target on the Shapley values of 
 the original features, on the validation set,
 discarding the features with negative coefficients, and ranking/filtering the rest according to their 
-statistical significance. For motivation and details, see the [example notebook](https://github.com/transferwise/shap-select/blob/main/docs/Quick%20feature%20selection%20through%20regression%20on%20Shapley%20values.ipynb)
+statistical significance. For motivation and details, refer to our [research paper](https://arxiv.org/abs/2410.06815) see the [example notebook](https://github.com/transferwise/shap-select/blob/main/docs/Quick%20feature%20selection%20through%20regression%20on%20Shapley%20values.ipynb)
 
 Earlier packages using Shapley values for feature selection exist, the advantages of this one are
 * Regression on the **validation set** to combat overfitting
@@ -109,3 +109,17 @@ selected_features_df = shap_select(model, X_val, y_val, task="multiclass", thres
 </table>
 
 
+## Citation
+
+If you use `shap-select` in your research, please cite our paper:
+
+```bibtex
+@misc{kraev2024shapselectlightweightfeatureselection,
+      title={Shap-Select: Lightweight Feature Selection Using SHAP Values and Regression}, 
+      author={Egor Kraev and Baran Koseoglu and Luca Traverso and Mohammed Topiwalla},
+      year={2024},
+      eprint={2410.06815},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2410.06815}, 
+}
