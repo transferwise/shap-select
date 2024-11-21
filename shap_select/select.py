@@ -1,9 +1,12 @@
 from typing import Any, Tuple, List, Dict
 
+import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import scipy.stats as stats
 import shap
+
+from shap_select.balance import balance_dataset
 
 
 def create_shap_features(
@@ -44,7 +47,7 @@ def create_shap_features(
 
 
 def binary_classifier_significance(
-    shap_features: pd.DataFrame, target: pd.Series, alpha: float
+    shap_features: pd.DataFrame, target: pd.Series, alpha: float, balance_ds=False
 ) -> pd.DataFrame:
     """
     Fits a logistic regression model using the features from `shap_features` to predict the binary `target`.
@@ -61,13 +64,19 @@ def binary_classifier_significance(
         - stderr: The standard error for each coefficient.
         - stat.significance: The p-value (statistical significance) for each feature.
     """
+    if balance_ds:
+        shap_features, target = balance_dataset(shap_features, target)
 
     # Add a constant to the features for the intercept in logistic regression
     shap_features_with_constant = sm.add_constant(shap_features)
 
     # Fit the logistic regression model that will generate confidence intervals
     logit_model = sm.Logit(target, shap_features_with_constant)
-    result = logit_model.fit_regularized(disp=False, alpha=alpha)
+    cond = np.linalg.cond(shap_features.values)
+    if cond > 1e3:
+        result = logit_model.fit_regularized(disp=False, alpha=alpha)
+    else:
+        result = logit_model.fit()
 
     # Extract the results
     summary_frame = result.summary2().tables[1]
@@ -158,7 +167,11 @@ def regression_significance(
     """
     # Fit the linear regression model that will generate confidence intervals
     ols_model = sm.OLS(target, shap_features)
-    result = ols_model.fit_regularized(alpha=alpha, refit=True)
+    cond = np.linalg.cond(shap_features.values)
+    if cond > 1e3:
+        result = ols_model.fit_regularized(alpha=alpha, refit=True)
+    else:
+        result = ols_model.fit()
 
     # Extract the results
     summary_frame = result.summary2().tables[1]
@@ -227,6 +240,7 @@ def iterative_shap_feature_reduction(
     target: pd.Series,
     task: str,
     alpha: float = 1e-6,
+    cond_threshold: float = 1e6,
 ) -> pd.DataFrame:
     collected_rows = []  # List to store the rows we collect during each iteration
 
@@ -245,21 +259,37 @@ def iterative_shap_feature_reduction(
 
         # Drop the feature corresponding to the lowest t-value from shap_features
         feature_to_remove = min_t_value_row["feature name"]
+        cond = 1.0
         if isinstance(shap_features, pd.DataFrame):
             shap_features = shap_features.drop(columns=[feature_to_remove])
+            # Check for conditioning number
             features_left = len(shap_features.columns)
+            if features_left:
+                cond = np.linalg.cond(shap_features.values)
         else:
             shap_features = {
                 k: v.drop(columns=[feature_to_remove]) for k, v in shap_features.items()
             }
+
             features_left = len(list(shap_features.values())[0].columns)
+            if features_left:
+                conds = {k: np.linalg.cond(v.values) for k, v in shap_features.items()}
+                cond = max(conds.values())
+
+        print("Condition number:", cond)
+        if (
+            cond < cond_threshold
+        ):  # matrix is well-conditioned, don't need to remove more features
+            break
+
+    if features_left:
+        # The latest row is still contained in significance_df
+        collected_rows.pop()
 
     # Convert collected rows back to a dataframe
-    result_df = (
-        pd.DataFrame(collected_rows)
-        .sort_values(by="t-value", ascending=False)
-        .reset_index()
-    )
+    all_rows = pd.concat([pd.DataFrame(collected_rows), significance_df], axis=0)
+
+    result_df = all_rows.sort_values(by="t-value", ascending=False).reset_index()
 
     return result_df
 
