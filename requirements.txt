@@ -2,3 +2,4 @@ pandas
 scipy
 shap
 statsmodels
+numpy
