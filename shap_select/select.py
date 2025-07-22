@@ -4,6 +4,7 @@ import pandas as pd
 import statsmodels.api as sm
 import scipy.stats as stats
 import shap
+import numpy as np
 
 
 def create_shap_features(
@@ -65,9 +66,20 @@ def binary_classifier_significance(
     # Add a constant to the features for the intercept in logistic regression
     shap_features_with_constant = sm.add_constant(shap_features)
 
-    # Fit the logistic regression model that will generate confidence intervals
-    logit_model = sm.Logit(target, shap_features_with_constant)
-    result = logit_model.fit_regularized(disp=False, alpha=alpha)
+    alpha_in_loop = alpha
+    max_retries = 10  # Set a maximum number of retries to avoid infinite loops
+    for attempt in range(max_retries):
+        try:
+            # Fit the logistic regression model that will generate confidence intervals
+            logit_model = sm.Logit(target, shap_features_with_constant)
+            result = logit_model.fit_regularized(disp=False, alpha=alpha_in_loop)
+            break  # Exit the loop if successful
+        except np.linalg.LinAlgError as ex:  # Catch Singular Matrix or related issues
+            alpha_in_loop *= 5  # Increase alpha exponentially to avoid  singular matrix problem 
+        except Exception as ex:  # Catch any other exception
+            raise RuntimeError(ex) # Re-raise the exception for debugging or further handling
+    else:
+        raise RuntimeError("Logistic regression failed to converge after maximum retries.")
 
     # Extract the results
     summary_frame = result.summary2().tables[1]
@@ -237,11 +249,16 @@ def iterative_shap_feature_reduction(
             shap_features, target, task, alpha
         )
 
+        if significance_df["t-value"].isna().all():
+            collected_rows.extend(significance_df.to_dict('records')) 
+            break
+
+
         # Find the feature with the lowest t-value
         min_t_value_row = significance_df.loc[significance_df["t-value"].idxmin()]
 
         # Remember this row (collect it in our list)
-        collected_rows.append(min_t_value_row)
+        collected_rows.append(min_t_value_row.to_dict())
 
         # Drop the feature corresponding to the lowest t-value from shap_features
         feature_to_remove = min_t_value_row["feature name"]
