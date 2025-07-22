@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="shap-select",
-    version="0.1.1",
+    version="0.1.2",
     description="Heuristic for quick feature selection for tabular regression/classification using shapley values",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -25,6 +25,7 @@ setup(
         "scipy>=1.8.0",
         "shap",
         "statsmodels",
+        "numpy",
     ],
     extras_require={
         "test": ["flake8", "pytest", "pytest-cov"],
