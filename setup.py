@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="shap-select",
-    version="0.1.0",
+    version="0.1.1",
     description="Heuristic for quick feature selection for tabular regression/classification using shapley values",
     long_description=long_description,
     long_description_content_type="text/markdown",
