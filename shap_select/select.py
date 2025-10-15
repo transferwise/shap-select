@@ -7,6 +7,36 @@ import shap
 import numpy as np
 
 
+def _is_tree_based_model(model):
+    """
+    Check if the model is a tree-based classifier or regressor from sklearn, xgboost, or lightgbm
+    without requiring the packages to be installed.
+
+    Parameters:
+        model: An instance of a model.
+
+    Returns:
+        bool: True if the model is tree-based, False otherwise.
+    """
+    module = type(model).__module__
+    class_name = type(model).__name__
+
+    sklearn_tree_keywords = [
+        "DecisionTree", "RandomForest", "ExtraTrees", "GradientBoosting",
+        "HistGradientBoosting", "Bagging", "AdaBoost"
+    ]
+    xgboost_class_names = ["XGBClassifier", "XGBRegressor"]
+    lightgbm_class_names = ["LGBMClassifier", "LGBMRegressor"]
+
+    if module.startswith("sklearn.ensemble") or module.startswith("sklearn.tree"):
+        return any(name in class_name for name in sklearn_tree_keywords)
+    elif module.startswith("xgboost") and class_name in xgboost_class_names:
+        return True
+    elif module.startswith("lightgbm") and class_name in lightgbm_class_names:
+        return True
+    return False
+
+
 def create_shap_features(
     tree_model: Any, validation_df: pd.DataFrame, classes: List | None = None
 ) -> pd.DataFrame | Dict[Any, pd.DataFrame]:
@@ -22,7 +52,10 @@ def create_shap_features(
     - pd.DataFrame: A DataFrame containing the SHAP values for each feature in the `validation_df`, where each column
       corresponds to the SHAP values of a feature, and the rows match the index of the `validation_df`.
     """
-    explainer = shap.Explainer(tree_model, model_output="raw")(validation_df)
+    if _is_tree_based_model(tree_model):
+        explainer = shap.TreeExplainer(tree_model, model_output="raw")(validation_df)
+    else:
+        explainer = shap.Explainer(tree_model, model_output="raw")(validation_df)
     shap_values = explainer.values
 
     if len(shap_values.shape) == 2:
